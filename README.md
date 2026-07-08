@@ -17,6 +17,10 @@
 - **LLM**: Google Gemini API с фолбэк-цепочкой `gemini-2.5-flash` → `gemini-2.5-flash-lite` →
   облачная Ollama → локальная Ollama.
 
+## Запуск в облаке
+
+Требует заполнения переменных: GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MODEL_LITE, OLLAMA_CLOUD_API_KEY, OLLAMA_CLOUD_MODEL.
+
 ## Запуск локально
 
 ```bash
@@ -25,12 +29,11 @@ cp .env.example .env   # заполнить GEMINI_API_KEY и остальные
 npm start               # http://localhost:3000
 ```
 
-## Переменные окружения
+## Переменные окружения для локального запуска
 
 См. `.env.example`. Обязательна как минимум `GEMINI_API_KEY`; остальные — опциональные звенья
 фолбэк-цепочки LLM.
 
-## Известные ограничения
-
-- hh.ru прикрыт антибот-защитой (DDoS-Guard): парсинг страницы вакансии обычным HTTP-запросом
-  может блокироваться при обращении с дата-центровых IP (актуально для облачного деплоя).
+## Скриншоты
+![Верхняя часть](https://github.com/wonderlab-studio/obrabotka-vakansiy/raw/master/image/Gen1.png)
+![Нижняя часть](https://github.com/wonderlab-studio/obrabotka-vakansiy/raw/master/image/Gen2.png)
