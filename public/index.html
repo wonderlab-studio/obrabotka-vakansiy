@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Генератор сопроводительного письма</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     ДИЗАЙН-ТОКЕНЫ. Правьте здесь — меняется всё приложение.
+     ───────────────────────────────────────────────────────────── */
+  :root {
+    --accent:      #6d4aff;   /* фиолетовый акцент */
+    --accent-soft: #f2effc;
+    --ink:         #1a1830;   /* основной текст */
+    --ink-2:       #3a3752;
+    --muted:       #6b6880;
+    --muted-2:     #8a86a6;
+    --line:        #eae7f5;   /* границы карточек */
+    --line-input:  #e3dff3;
+    --panel:       #ffffff;
+    --page:        #eceafc;
+    --surface:     #f7f6fc;   /* фон главной карточки */
+    --ok:          #17835a;   /* требование подтверждено опытом */
+    --ok-bg:       #e7f6ef;
+    --no:          #d1435b;   /* требование без опыта */
+    --no-bg:       #fdeef0;
+    --err:         #d1435b;
+    --radius:      16px;
+    --font-sans:  'IBM Plex Sans', system-ui, sans-serif;
+    --font-disp:  'Space Grotesk', system-ui, sans-serif;
+    --font-mono:  'IBM Plex Mono', ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    background: radial-gradient(1100px 620px at 50% -12%, #efeafd 0%, var(--page) 55%);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  textarea { resize: vertical; font-family: var(--font-sans); }
+  textarea::placeholder, input::placeholder { color: #a9a6bd; }
+  button { font-family: var(--font-sans); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(120,110,170,.28); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+  @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Каркас страницы ─────────────────────────────────────────── */
+  .page  { max-width: 860px; margin: 0 auto; padding: clamp(20px, 5vw, 72px) clamp(16px, 4vw, 40px) 80px; display: flex; flex-direction: column; gap: 32px; }
+  .intro { display: flex; flex-direction: column; gap: 8px; }
+  .intro .eyebrow { font: 500 12px var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-2); }
+  .intro h1 { margin: 0; font: 700 clamp(24px, 5vw, 34px) var(--font-disp); letter-spacing: -.01em; }
+  .intro p  { margin: 0; font-size: 15px; color: var(--muted); line-height: 1.5; }
+
+  .app {
+    background: var(--surface);
+    border: 1px solid #e6e3f4;
+    border-radius: 24px;
+    padding: clamp(18px, 4vw, 30px);
+    display: flex; flex-direction: column; gap: 22px;
+    box-shadow: 0 2px 4px rgba(20,10,60,.04), 0 34px 80px rgba(80,55,200,.12);
+  }
+
+  /* ── Шапка приложения ────────────────────────────────────────── */
+  .brand-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 18px var(--font-disp); }
+  .brand .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 5px rgba(109,74,255,.16); animation: pulseDot 2.4s ease-in-out infinite; }
+  .brand .accent { color: var(--accent); }
+  .reset { background: none; border: none; cursor: pointer; font: 500 12px var(--font-mono); color: var(--muted-2); display: flex; align-items: center; gap: 6px; }
+
+  /* ── Строка ввода ссылки ─────────────────────────────────────── */
+  .url-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .url-row input { flex: 1 1 240px; background: #fff; border: 1px solid var(--line-input); border-radius: 13px; padding: 15px 16px; font-size: 15px; color: var(--ink); outline: none; }
+  .url-row input:focus { border-color: var(--accent); }
+  .btn-dark { background: var(--ink); color: #fff; border: none; border-radius: 13px; padding: 15px 26px; font-weight: 600; font-size: 15px; cursor: pointer; white-space: nowrap; }
+
+  /* ── Ошибка ───────────────────────────────────────────────────── */
+  .error-box { border: 1.5px solid #f3c6cd; background: var(--no-bg); color: var(--err); border-radius: var(--radius); padding: 14px 16px; font-size: 13.5px; line-height: 1.5; }
+
+  /* ── Карточки-панели ─────────────────────────────────────────── */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; box-shadow: 0 1px 2px rgba(20,10,60,.04); }
+  .label { font: 600 12px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-2); }
+  .label--accent { color: var(--accent); font-size: 13px; }
+
+  /* Пустое состояние / плейсхолдер */
+  .placeholder { border: 1.5px dashed #d8d3ee; border-radius: var(--radius); padding: 40px 28px; text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center; background: #fbfaff; }
+  .placeholder .tag { font: 500 12px var(--font-mono); color: var(--muted-2); letter-spacing: .05em; }
+  .placeholder .txt { font-size: 14px; color: var(--muted-2); max-width: 380px; line-height: 1.5; }
+  .placeholder .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid #d8d3ee; border-top-color: var(--accent); animation: spin .8s linear infinite; }
+
+  /* Раскладка результата: большой блок требований + группа из 3 блоков */
+  .result-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+
+  .req-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .req-count { font-size: 12px; color: var(--muted-2); }
+  .legend { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--muted-2); margin-bottom: 12px; }
+  .legend .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: middle; }
+  .legend .score { margin-left: auto; font: 500 12px var(--font-mono); color: var(--ok); }
+  .req-list { display: flex; flex-direction: column; gap: 7px; max-height: 360px; overflow: auto; padding-right: 4px; }
+  .req { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; border-left: 3px solid var(--line); background: #faf9ff; }
+  .req .rdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: #c3bfe0; }
+  .req .rtext { flex: 1; font-size: 13.5px; color: var(--ink-2); line-height: 1.35; }
+  .req .rstatus { font: 500 11px var(--font-mono); white-space: nowrap; display: none; }
+  /* Состояния после генерации (класс ставится из JS) */
+  .req.ok { border-left-color: var(--ok); background: var(--ok-bg); }
+  .req.ok .rdot { background: var(--ok); }
+  .req.ok .rstatus { color: var(--ok); display: inline; }
+  .req.no { border-left-color: var(--no); background: var(--no-bg); }
+  .req.no .rdot { background: var(--no); }
+  .req.no .rstatus { color: var(--no); display: inline; }
+
+  .mini-group { display: flex; flex-direction: column; gap: 12px; }
+  .mini { display: flex; flex-direction: column; gap: 9px; }
+  .mini ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .mini li { display: flex; gap: 8px; font-size: 13px; color: var(--ink-2); line-height: 1.4; }
+  .mini li::before { content: "·"; color: var(--accent); }
+
+  /* Поля опыта и контактов */
+  .fields-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field-head { display: flex; align-items: center; gap: 8px; position: relative; }
+  .field-head .label { color: var(--muted); font-size: 13px; }
+  .help { width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 600 12px var(--font-sans); display: flex; align-items: center; justify-content: center; cursor: help; }
+  .tip { position: absolute; top: 26px; left: 0; z-index: 5; width: min(400px, 80vw); background: var(--ink); color: #e9e7f5; border-radius: 12px; padding: 13px 15px; font-size: 12.5px; line-height: 1.55; box-shadow: 0 12px 32px rgba(20,10,60,.28); display: none; }
+  .field-head:hover .tip, .field-head:focus-within .tip { display: block; }
+  textarea { min-height: 150px; max-height: 240px; overflow: auto; background: #fff; border: 1px solid var(--line-input); border-radius: 13px; padding: 13px 15px; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; outline: none; }
+  textarea:focus { border-color: var(--accent); }
+
+  /* Главная кнопка генерации */
+  .btn-generate { background: var(--accent); color: #fff; border: none; border-radius: 14px; padding: 17px; font-weight: 600; font-size: 15px; cursor: pointer; box-shadow: 0 8px 22px rgba(109,74,255,.32); }
+
+  /* Блок сопроводительного */
+  .cover-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .copy-btn { display: flex; align-items: center; gap: 7px; background: var(--accent-soft); color: var(--accent); border: 1px solid #e2dbf7; border-radius: 10px; padding: 8px 13px; font: 500 13px var(--font-sans); cursor: pointer; }
+  .cover-text { font-size: 14px; color: var(--ink-2); line-height: 1.65; white-space: pre-wrap; }
+
+  .hidden { display: none !important; }
+
+  /* ── Адаптив ─────────────────────────────────────────────────── */
+  @media (max-width: 720px) {
+    .result-grid, .fields-grid { grid-template-columns: 1fr; }
+    .btn-dark { flex: 1 1 100%; }
+    .tip { width: min(400px, 90vw); }
+  }
+</style>
+</head>
+<body>
+  <main class="page">
+
+    <header class="intro">
+      <span class="eyebrow">Свободный доступ · без авторизации</span>
+      <h1>Генератор сопроводительного письма</h1>
+      <p>Вставьте ссылку на вакансию hh.ru — сервис разберёт её через LLM, сопоставит требования с вашим опытом и соберёт готовое письмо.</p>
+    </header>
+
+    <section class="app">
+
+      <!-- Шапка -->
+      <div class="brand-row">
+        <div class="brand"><span class="dot"></span>coverletter<span class="accent">.ai</span></div>
+        <button class="reset" id="resetBtn">↺ сбросить</button>
+      </div>
+
+      <!-- 1. Поле ссылки + 2. кнопка «Обработать» -->
+      <div class="url-row">
+        <input id="urlInput" type="url" placeholder="https://hh.ru/vacancy/…">
+        <button class="btn-dark" id="processBtn">Обработать</button>
+      </div>
+
+      <div class="error-box hidden" id="parseError"></div>
+
+      <!-- Пустое состояние результата -->
+      <div class="placeholder" id="emptyState">
+        <span class="tag">// РЕЗУЛЬТАТ РАЗБОРА</span>
+        <span class="txt">Вставьте ссылку на вакансию и нажмите «Обработать» — здесь появятся блоки о компании, задачах, требованиях и бонусах.</span>
+      </div>
+
+      <!-- Состояние загрузки разбора вакансии -->
+      <div class="placeholder hidden" id="parseLoading">
+        <span class="spinner"></span>
+        <span class="txt">Разбираю вакансию и обращаюсь к LLM — это может занять несколько секунд…</span>
+      </div>
+
+      <!-- 3. Результат разбора: большой блок требований + группа из 3 блоков -->
+      <div class="result-grid hidden" id="resultState">
+
+        <!-- Требования (крупный блок, может быть 20+ строк, со скроллом) -->
+        <div class="panel">
+          <div class="req-head">
+            <span class="label label--accent">Требования</span>
+            <span class="req-count" id="reqCount">0 пунктов</span>
+          </div>
+          <div class="legend">
+            <span><span class="sw" style="background:var(--ok)"></span>есть опыт</span>
+            <span><span class="sw" style="background:var(--no)"></span>нет опыта</span>
+            <span class="score hidden" id="score"></span>
+          </div>
+          <!-- Каждое требование — отдельный элемент. После генерации получает класс .ok / .no -->
+          <div class="req-list" id="reqList"></div>
+        </div>
+
+        <!-- Компания / Задачи / Бонусы -->
+        <div class="mini-group">
+          <div class="panel mini"><span class="label">О компании</span><ul id="companyList"></ul></div>
+          <div class="panel mini"><span class="label">Задачи</span><ul id="tasksList"></ul></div>
+          <div class="panel mini"><span class="label">Бонусы</span><ul id="bonusList"></ul></div>
+        </div>
+      </div>
+
+      <!-- 4. Тезисы опыта (+ подсказка) и 5. Контакты -->
+      <div class="fields-grid">
+        <div class="field">
+          <div class="field-head">
+            <span class="label">Тезисы опыта</span>
+            <span class="help" tabindex="0">?</span>
+            <div class="tip">Введите тезисы о своём опыте, каждый — с новой строки. Например: «В компании СуперКорп писал веб-приложения на PHP с обязательными смоук-тестами» или «Для проекта СуперСайт проводил бизнес-анализ с формализацией ФТ/НФТ и диаграммами BPMN, UML (последовательности, прецеденты)».</div>
+          </div>
+          <textarea id="expInput" placeholder="Каждый тезис с новой строки…"></textarea>
+        </div>
+        <div class="field">
+          <span class="label">Контакты</span>
+          <textarea id="contactsInput" placeholder="Имя, телефон, e-mail, Telegram…"></textarea>
+        </div>
+      </div>
+
+      <!-- 6. Кнопка генерации -->
+      <button class="btn-generate" id="generateBtn">Сгенерировать сопроводительное</button>
+
+      <div class="error-box hidden" id="generateError"></div>
+
+      <!-- 7. Сопроводительное письмо + копирование -->
+      <div class="placeholder" id="coverEmpty">
+        <span class="txt">Нажмите «Сгенерировать» — письмо появится здесь, а требования окрасятся по наличию опыта.</span>
+      </div>
+      <div class="placeholder hidden" id="coverLoading">
+        <span class="spinner"></span>
+        <span class="txt">Сопоставляю требования с опытом и пишу письмо…</span>
+      </div>
+      <div class="panel hidden" id="coverState">
+        <div class="cover-head">
+          <span class="label label--accent">Сопроводительное письмо</span>
+          <button class="copy-btn" id="copyBtn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>
+            <span id="copyLabel">Копировать</span>
+          </button>
+        </div>
+        <div class="cover-text" id="coverText"></div>
+      </div>
+
+    </section>
+  </main>
+
+<script>
+// --- DOM ---
+const $ = (id) => document.getElementById(id);
+const el = {
+  urlInput: $("urlInput"), processBtn: $("processBtn"), resetBtn: $("resetBtn"),
+  emptyState: $("emptyState"), parseLoading: $("parseLoading"), parseError: $("parseError"),
+  resultState: $("resultState"), reqList: $("reqList"), reqCount: $("reqCount"),
+  score: $("score"), companyList: $("companyList"), tasksList: $("tasksList"), bonusList: $("bonusList"),
+  expInput: $("expInput"), contactsInput: $("contactsInput"), generateBtn: $("generateBtn"),
+  generateError: $("generateError"),
+  coverEmpty: $("coverEmpty"), coverLoading: $("coverLoading"), coverState: $("coverState"), coverText: $("coverText"),
+  copyBtn: $("copyBtn"), copyLabel: $("copyLabel"),
+};
+
+// Текущее состояние вакансии/требований (сессионно, только в памяти вкладки)
+let vacancy = null; // { company, tasks, bonuses, requirements }
+let currentReqs = []; // [{text, matched: null|true|false}]
+
+function renderBullets(ul, items) {
+  ul.innerHTML = "";
+  items.forEach((t) => {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ul.appendChild(li);
+  });
+}
+
+function renderRequirements() {
+  el.reqList.innerHTML = "";
+  currentReqs.forEach((r) => {
+    const row = document.createElement("div");
+    row.className = "req" + (r.matched === true ? " ok" : r.matched === false ? " no" : "");
+    row.innerHTML = `<span class="rdot"></span><span class="rtext"></span><span class="rstatus"></span>`;
+    row.querySelector(".rtext").textContent = r.text;
+    row.querySelector(".rstatus").textContent =
+      r.matched === true ? "опыт найден" : r.matched === false ? "нет опыта" : "";
+    el.reqList.appendChild(row);
+  });
+  el.reqCount.textContent = currentReqs.length + " пунктов";
+}
+
+function showError(box, message) {
+  box.textContent = message;
+  box.classList.remove("hidden");
+}
+function hideError(box) {
+  box.classList.add("hidden");
+}
+
+/* Шаг «Обработать» — распарсить вакансию (бэкенд) и структурировать через LLM. */
+async function processVacancy() {
+  const url = el.urlInput.value.trim();
+  if (!url) return;
+
+  hideError(el.parseError);
+  el.emptyState.classList.add("hidden");
+  el.resultState.classList.add("hidden");
+  el.parseLoading.classList.remove("hidden");
+  el.processBtn.disabled = true;
+
+  try {
+    const res = await fetch("/api/parse-vacancy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Не удалось обработать вакансию.");
+
+    vacancy = data; // { company, tasks, bonuses, requirements }
+    currentReqs = data.requirements.map((text) => ({ text, matched: null }));
+    renderRequirements();
+    // Company/tasks — одно предложение (см. requirements.md, 4.2) — список из одного пункта.
+    renderBullets(el.companyList, [data.company]);
+    renderBullets(el.tasksList, [data.tasks]);
+    // Bonuses — строка через запятую (5.5.1) — разбиваем на пункты списка под вёрстку макета.
+    renderBullets(
+      el.bonusList,
+      data.bonuses.split(",").map((s) => s.trim()).filter(Boolean)
+    );
+
+    el.resultState.classList.remove("hidden");
+  } catch (err) {
+    el.emptyState.classList.remove("hidden");
+    showError(el.parseError, err.message);
+  } finally {
+    el.parseLoading.classList.add("hidden");
+    el.processBtn.disabled = false;
+  }
+}
+
+/* Шаг «Сгенерировать» — сопоставить опыт и требования (LLM), собрать письмо (без LLM). */
+async function generateCover() {
+  if (!currentReqs.length) return; // сначала нужно обработать вакансию
+
+  hideError(el.generateError);
+  el.coverEmpty.classList.add("hidden");
+  el.coverState.classList.add("hidden");
+  el.coverLoading.classList.remove("hidden");
+  el.generateBtn.disabled = true;
+
+  const theses = el.expInput.value
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  try {
+    const res = await fetch("/api/generate-cover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requirements: currentReqs.map((r) => r.text),
+        company: vacancy.company,
+        tasks: vacancy.tasks,
+        bonuses: vacancy.bonuses,
+        theses,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Не удалось сгенерировать сопроводительное письмо.");
+
+    // Сопоставляем по порядку: LLM не всегда возвращает "requirement" дословно (перефразирует),
+    // поэтому точный текст ненадёжен как ключ — доверяем позиции в массиве (длины совпадают).
+    currentReqs = currentReqs.map((r, i) => {
+      const status = data.requirements_status[i] || data.requirements_status.find((s) => s.requirement === r.text);
+      return { ...r, matched: status ? !!status.matched : false };
+    });
+    renderRequirements();
+
+    const matched = currentReqs.filter((r) => r.matched).length;
+    el.score.textContent = matched + "/" + currentReqs.length + " ✓";
+    el.score.classList.remove("hidden");
+
+    el.coverText.textContent = assembleLetter(data.intro, data.experience_part, el.contactsInput.value.trim());
+    el.coverState.classList.remove("hidden");
+  } catch (err) {
+    el.coverEmpty.classList.remove("hidden");
+    showError(el.generateError, err.message);
+  } finally {
+    el.coverLoading.classList.add("hidden");
+    el.generateBtn.disabled = false;
+  }
+}
+
+// Сборка письма без LLM — см. requirements.md, раздел 5.4.
+function assembleLetter(intro, experiencePart, contacts) {
+  const parts = ["Здравствуйте!", intro.trim()];
+  if (experiencePart && experiencePart.trim()) parts.push(experiencePart.trim());
+  parts.push("Буду рад обсудить детали.");
+  if (contacts) parts.push(contacts);
+  return parts.join("\n\n");
+}
+
+function resetAll() {
+  el.urlInput.value = "";
+  el.expInput.value = "";
+  el.contactsInput.value = "";
+  vacancy = null;
+  currentReqs = [];
+  hideError(el.parseError);
+  hideError(el.generateError);
+  el.emptyState.classList.remove("hidden");
+  el.parseLoading.classList.add("hidden");
+  el.resultState.classList.add("hidden");
+  el.coverEmpty.classList.remove("hidden");
+  el.coverLoading.classList.add("hidden");
+  el.coverState.classList.add("hidden");
+  el.score.classList.add("hidden");
+}
+
+async function copyCover() {
+  try {
+    await navigator.clipboard.writeText(el.coverText.textContent);
+  } catch (e) {
+    // буфер обмена недоступен (например, без HTTPS/permission) — тихо игнорируем
+  }
+  el.copyLabel.textContent = "Скопировано";
+  setTimeout(() => {
+    el.copyLabel.textContent = "Копировать";
+  }, 1600);
+}
+
+el.processBtn.addEventListener("click", processVacancy);
+el.generateBtn.addEventListener("click", generateCover);
+el.resetBtn.addEventListener("click", resetAll);
+el.copyBtn.addEventListener("click", copyCover);
+</script>
+</body>
+</html>
