@@ -2,7 +2,7 @@ require("dotenv").config();
 const path = require("path");
 const express = require("express");
 const { fetchVacancyText } = require("./hhParser");
-const { structureVacancy, generateCoverParts } = require("./gemini");
+const { structureVacancy, generateCoverParts } = require("./llm");
 
 const app = express();
 const PORT = process.env.PORT || 3000;

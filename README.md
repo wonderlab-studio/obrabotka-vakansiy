@@ -12,14 +12,16 @@
 ## Стек
 
 - **Бэкенд**: Node.js + Express (`server/`) — парсинг страницы вакансии hh.ru (`hhParser.js`)
-  и вызовы LLM (`gemini.js`).
+  и вызовы LLM (`llm.js`).
 - **Фронтенд**: статический HTML/CSS/JS (`public/index.html`), без фреймворка.
-- **LLM**: Google Gemini API с фолбэк-цепочкой `gemini-2.5-flash` → `gemini-2.5-flash-lite` →
-  облачная Ollama → локальная Ollama.
+- **LLM**: цепочка из 7 бесплатных облачных провайдеров + платный резерв, см.
+  `requirements.md` (5.6). Уровень A (Groq + Cerebras — гонка, резерв Gemini) → уровень B
+  (Mistral, резерв Cohere) → уровень C (NVIDIA NIM, резерв GitHub Models) → облачная Ollama.
 
 ## Запуск в облаке
 
-Требует заполнения переменных: GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MODEL_LITE, OLLAMA_CLOUD_API_KEY, OLLAMA_CLOUD_MODEL.
+Требует заполнения переменных из `.env.example` — как минимум одно звено каждого уровня
+цепочки, чтобы сервис не остался совсем без LLM.
 
 ## Запуск локально
 
@@ -31,8 +33,9 @@ npm start               # http://localhost:3000
 
 ## Переменные окружения для локального запуска
 
-См. `.env.example`. Обязательна как минимум `GEMINI_API_KEY`; остальные — опциональные звенья
-фолбэк-цепочки LLM.
+См. `.env.example`. Все переменные — опциональные звенья фолбэк-цепочки LLM: звено без
+заданного ключа просто пропускается. Чтобы сервис не остался совсем без LLM, задайте ключ хотя
+бы для одного провайдера на каждом из трёх уровней (A/B/C) — см. `requirements.md`, 5.6.
 
 ## Скриншоты
 ![Верхняя часть](https://github.com/wonderlab-studio/obrabotka-vakansiy/raw/master/image/Gen1.png)
