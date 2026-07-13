@@ -2,8 +2,11 @@
 //
 // Уровень A (гонка): Groq + Cerebras параллельно, резерв — Gemini.
 // Уровень B: Mistral, резерв — Cohere.
-// Уровень C: NVIDIA NIM, резерв — GitHub Models.
+// Уровень C: OpenRouter, резерв — GitHub Models.
 // Финальный резерв: облачная Ollama.
+//
+// Для промпта 5.5.2 (сопоставление тезисов с требованиями) используется TIERS_MATCHING —
+// та же цепочка, но без Groq в уровне A (см. комментарий у TIERS_MATCHING ниже).
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -12,7 +15,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || "llama-3.3-70b";
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || "gpt-oss-120b";
 
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || "mistral-small-latest";
@@ -20,8 +23,8 @@ const MISTRAL_MODEL = process.env.MISTRAL_MODEL || "mistral-small-latest";
 const COHERE_API_KEY = process.env.COHERE_API_KEY;
 const COHERE_MODEL = process.env.COHERE_MODEL || "command-r-plus";
 
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
 
 const GITHUB_MODELS_TOKEN = process.env.GITHUB_MODELS_TOKEN;
 const GITHUB_MODELS_MODEL = process.env.GITHUB_MODELS_MODEL || "openai/gpt-4o-mini";
@@ -277,16 +280,16 @@ const PROVIDERS = {
         timeoutMs: CLOUD_TIMEOUT_MS,
       }),
   },
-  nvidia: {
-    name: "NVIDIA NIM",
-    configured: () => Boolean(NVIDIA_API_KEY),
+  openrouter: {
+    name: "OpenRouter",
+    configured: () => Boolean(OPENROUTER_API_KEY),
     call: (prompt) =>
       callOpenAiCompatible({
-        url: "https://integrate.api.nvidia.com/v1/chat/completions",
-        apiKey: NVIDIA_API_KEY,
-        model: NVIDIA_MODEL,
+        url: "https://openrouter.ai/api/v1/chat/completions",
+        apiKey: OPENROUTER_API_KEY,
+        model: OPENROUTER_MODEL,
         prompt,
-        label: "NVIDIA NIM",
+        label: "OpenRouter",
         jsonMode: false,
         timeoutMs: CLOUD_TIMEOUT_MS,
       }),
@@ -317,8 +320,20 @@ const PROVIDERS = {
 const TIERS = [
   { primary: ["groq", "cerebras"], backup: "gemini" },
   { primary: ["mistral"], backup: "cohere" },
-  { primary: ["nvidia"], backup: "githubModels" },
+  { primary: ["openrouter"], backup: "githubModels" },
 ];
+
+// Отдельные уровни для промпта 5.5.2 (сопоставление тезисов с требованиями): без Groq в
+// уровне A — на практике Groq заметно хуже Gemini/Cerebras следует строгому лексическому
+// правилу совпадения (см. requirements.md 5.6), подбирая тезисы почти без разбора. Для
+// промпта 5.5.1 (структурирование вакансии) риск от нестрогого сопоставления не актуален —
+// там Groq остаётся в общей TIERS.
+const TIERS_MATCHING = [
+  { primary: ["cerebras"], backup: "gemini" },
+  { primary: ["mistral"], backup: "cohere" },
+  { primary: ["openrouter"], backup: "githubModels" },
+];
+
 const FINAL_FALLBACK = "ollamaCloud";
 
 async function tryProvider(key, prompt, errors) {
@@ -351,10 +366,10 @@ async function raceTier(keys, prompt, errors) {
   }
 }
 
-async function callLLM(prompt) {
+async function callLLM(prompt, tiers = TIERS) {
   const errors = [];
 
-  for (const tier of TIERS) {
+  for (const tier of tiers) {
     let result = await raceTier(tier.primary, prompt, errors);
     if (result == null) result = await raceTier([tier.backup], prompt, errors);
     if (result != null) return result;
@@ -410,11 +425,16 @@ function buildGeneratePrompt(inputJson) {
 (массив theses, нумерация с 0), найди соответствия. Требование и тезис считаются
 соответствующими, только если в обоих встречается одно и то же (или синонимичное)
 существительное, глагол или аббревиатура, называющие конкретный навык, технологию, тип
-артефакта или деятельность — общие слова вроде "проект", "работа", "опыт" не считаются.
-Аббревиатуры на разных языках для одного и того же артефакта — совпадение (например "ФТ" и
-"FR" — функциональные требования). Пример НЕсовпадения: "разработка архитектурного проекта"
-и "управление проектами разработки маркетплейсов" — общее только слово "проект". Пример
-совпадения: "разработка прототипов" и "прототипирование в Figma" — общий корень "прототип".
+артефакта или деятельность — общие слова вроде "проект", "работа", "опыт", "бизнес",
+"аналитика", "разработка" не считаются. Аббревиатуры на разных языках для одного и того же
+артефакта — совпадение (например "ФТ" и "FR" — функциональные требования). Пример
+НЕсовпадения: "разработка архитектурного проекта" и "управление проектами разработки
+маркетплейсов" — общее только слово "проект". Пример совпадения: "разработка прототипов" и
+"прототипирование в Figma" — общий корень "прототип".
+
+Отдельное правило для требований о стаже вида "опыт от N лет": тезис засчитывается, если в
+нём указано численное значение общего стажа ≥ N, даже если название должности не совпадает
+дословно (например тезис "10+ лет опыта" покрывает требование "от 5 лет").
 
 По этому правилу пометь требования, для которых нашёлся хотя бы один подходящий тезис, как
 "выполненные", остальные как "невыполненные". Отдельно собери номера ВСЕХ тезисов, которые
@@ -453,7 +473,7 @@ async function structureVacancy(vacancyText) {
 
 async function generateCoverParts({ requirements, company, tasks, bonuses, theses }) {
   const inputJson = { requirements, company, tasks, bonuses, theses };
-  const result = await callLLM(buildGeneratePrompt(inputJson));
+  const result = await callLLM(buildGeneratePrompt(inputJson), TIERS_MATCHING);
   if (
     typeof result.intro !== "string" ||
     !Array.isArray(result.matched_thesis_indices) ||
