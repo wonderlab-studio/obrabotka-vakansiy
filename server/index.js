@@ -15,6 +15,7 @@ app.post("/api/parse-vacancy", async (req, res) => {
   if (!url || typeof url !== "string") {
     return res.status(400).json({ error: "Не передана ссылка на вакансию." });
   }
+  console.log(`[usage] Обработать: ${url}`);
 
   try {
     const vacancyText = await fetchVacancyText(url);
@@ -30,6 +31,7 @@ app.post("/api/generate-cover", async (req, res) => {
   if (!Array.isArray(requirements) || !Array.isArray(theses)) {
     return res.status(400).json({ error: "Неверный формат данных: requirements и theses должны быть массивами." });
   }
+  console.log(`[usage] Сгенерировать сопроводительное: ${requirements.length} требований, ${theses.length} тезисов`);
 
   try {
     const result = await generateCoverParts({ requirements, company, tasks, bonuses, theses });
