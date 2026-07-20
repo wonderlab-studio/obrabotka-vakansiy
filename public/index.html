@@ -124,6 +124,7 @@
 
   /* Поля опыта и контактов */
   .fields-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
+  .field-col { display: flex; flex-direction: column; gap: 16px; }
   .field { display: flex; flex-direction: column; gap: 8px; }
   .field-head { display: flex; align-items: center; gap: 8px; position: relative; }
   .field-head .label { color: var(--muted); font-size: 13px; }
@@ -132,6 +133,8 @@
   .field-head:hover .tip, .field-head:focus-within .tip { display: block; }
   textarea { min-height: 150px; max-height: 240px; overflow: auto; background: #fff; border: 1px solid var(--line-input); border-radius: 13px; padding: 13px 15px; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; outline: none; }
   textarea:focus { border-color: var(--accent); }
+  .field input[type="text"] { background: #fff; border: 1px solid var(--line-input); border-radius: 13px; padding: 13px 15px; font-size: 13.5px; color: var(--ink-2); outline: none; }
+  .field input[type="text"]:focus { border-color: var(--accent); }
 
   /* Главная кнопка генерации */
   .btn-generate { background: var(--accent); color: #fff; border: none; border-radius: 14px; padding: 17px; font-weight: 600; font-size: 15px; cursor: pointer; box-shadow: 0 8px 22px rgba(109,74,255,.32); }
@@ -214,7 +217,7 @@
         </div>
       </div>
 
-      <!-- 4. Тезисы опыта (+ подсказка) и 5. Контакты -->
+      <!-- 4. Тезисы опыта (+ подсказка), 5. Приветствие и 6. Контакты -->
       <div class="fields-grid">
         <div class="field">
           <div class="field-head">
@@ -224,9 +227,19 @@
           </div>
           <textarea id="expInput" placeholder="Каждый тезис с новой строки…"></textarea>
         </div>
-        <div class="field">
-          <span class="label">Контакты</span>
-          <textarea id="contactsInput" placeholder="Имя, телефон, e-mail, Telegram…"></textarea>
+        <div class="field-col">
+          <div class="field">
+            <div class="field-head">
+              <span class="label">Приветствие</span>
+              <span class="help" tabindex="0">?</span>
+              <div class="tip">Необязательно. Если заполнено — полностью заменяет слово «Здравствуйте!» в начале письма. Например: «Здравствуйте, Мария!» или «Добрый день!».</div>
+            </div>
+            <input type="text" id="greetingInput" placeholder="Здравствуйте!">
+          </div>
+          <div class="field">
+            <span class="label">Контакты</span>
+            <textarea id="contactsInput" placeholder="Имя, телефон, e-mail, Telegram…"></textarea>
+          </div>
         </div>
       </div>
 
@@ -265,7 +278,7 @@ const el = {
   emptyState: $("emptyState"), parseLoading: $("parseLoading"), parseError: $("parseError"),
   resultState: $("resultState"), reqList: $("reqList"), reqCount: $("reqCount"),
   score: $("score"), companyList: $("companyList"), tasksList: $("tasksList"), bonusList: $("bonusList"),
-  expInput: $("expInput"), contactsInput: $("contactsInput"), generateBtn: $("generateBtn"),
+  expInput: $("expInput"), greetingInput: $("greetingInput"), contactsInput: $("contactsInput"), generateBtn: $("generateBtn"),
   generateError: $("generateError"),
   coverEmpty: $("coverEmpty"), coverLoading: $("coverLoading"), coverState: $("coverState"), coverText: $("coverText"),
   copyBtn: $("copyBtn"), copyLabel: $("copyLabel"),
@@ -390,7 +403,7 @@ async function generateCover() {
     el.score.textContent = matched + "/" + currentReqs.length + " ✓";
     el.score.classList.remove("hidden");
 
-    el.coverText.textContent = assembleLetter(data.intro, data.experience_part, el.contactsInput.value.trim());
+    el.coverText.textContent = assembleLetter(data.intro, data.experience_part, el.contactsInput.value.trim(), el.greetingInput.value.trim());
     el.coverState.classList.remove("hidden");
   } catch (err) {
     el.coverEmpty.classList.remove("hidden");
@@ -402,8 +415,8 @@ async function generateCover() {
 }
 
 // Сборка письма без LLM — см. requirements.md, раздел 5.4.
-function assembleLetter(intro, experiencePart, contacts) {
-  const parts = ["Здравствуйте!", intro.trim()];
+function assembleLetter(intro, experiencePart, contacts, greeting) {
+  const parts = [greeting || "Здравствуйте!", intro.trim()];
   if (experiencePart && experiencePart.trim()) parts.push(experiencePart.trim());
   parts.push("Буду рад обсудить детали.");
   if (contacts) parts.push(contacts);
@@ -413,6 +426,7 @@ function assembleLetter(intro, experiencePart, contacts) {
 function resetAll() {
   el.urlInput.value = "";
   el.expInput.value = "";
+  el.greetingInput.value = "";
   el.contactsInput.value = "";
   vacancy = null;
   currentReqs = [];
