@@ -1,8 +1,10 @@
 // Фолбэк-цепочка LLM-провайдеров — см. requirements.md, раздел 5.6.
 //
-// Уровень A (гонка): Groq + Cerebras параллельно, резерв — Gemini.
+// Уровень A: Groq (соло — Cerebras исключён из цепочки, недоступен на аккаунте пользователя,
+// см. requirements.md 5.6), резерв — Gemini.
 // Уровень B: Mistral, резерв — Cohere.
-// Уровень C: OpenRouter, резерв — GitHub Models.
+// Уровень C: OpenRouter, резерв — Cloudflare Workers AI (заменил GitHub Models — тот в
+// плановом выводе из эксплуатации, см. requirements.md 5.6).
 // Финальный резерв: облачная Ollama.
 //
 // Для промпта 5.5.2 (сопоставление тезисов с требованиями) используется TIERS_MATCHING —
@@ -14,6 +16,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
+// Cerebras исключён из цепочки (см. requirements.md 5.6) — не подключён ни в TIERS, ни в
+// TIERS_MATCHING. Провайдер и обращение к нему оставлены ниже на случай, если понадобится
+// вернуть (как и локальная Ollama).
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || "gpt-oss-120b";
 
@@ -26,8 +31,11 @@ const COHERE_MODEL = process.env.COHERE_MODEL || "command-r-plus";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
 
-const GITHUB_MODELS_TOKEN = process.env.GITHUB_MODELS_TOKEN;
-const GITHUB_MODELS_MODEL = process.env.GITHUB_MODELS_MODEL || "openai/gpt-4o-mini";
+// Cloudflare Workers AI — OpenAI-совместимый эндпоинт, но, в отличие от остальных провайдеров
+// цепочки, привязан к конкретному аккаунту (CLOUDFLARE_ACCOUNT_ID в URL, не только токен).
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const CLOUDFLARE_TOKEN = process.env.CLOUDFLARE_TOKEN;
+const CLOUDFLARE_MODEL = process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 // Облачная Ollama (https://ollama.com) — нативный API (/api/generate) по адресу ollama.com с
 // Bearer-токеном; модели там называются с суффиксом "-cloud" (см. https://docs.ollama.com/cloud).
@@ -294,19 +302,18 @@ const PROVIDERS = {
         timeoutMs: CLOUD_TIMEOUT_MS,
       }),
   },
-  githubModels: {
-    name: "GitHub Models",
-    configured: () => Boolean(GITHUB_MODELS_TOKEN),
+  cloudflare: {
+    name: "Cloudflare Workers AI",
+    configured: () => Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_TOKEN),
     call: (prompt) =>
       callOpenAiCompatible({
-        url: "https://models.github.ai/inference/chat/completions",
-        apiKey: GITHUB_MODELS_TOKEN,
-        model: GITHUB_MODELS_MODEL,
+        url: `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`,
+        apiKey: CLOUDFLARE_TOKEN,
+        model: CLOUDFLARE_MODEL,
         prompt,
-        label: "GitHub Models",
+        label: "Cloudflare Workers AI",
         jsonMode: false,
         timeoutMs: CLOUD_TIMEOUT_MS,
-        extraHeaders: { Accept: "application/vnd.github+json" },
       }),
   },
   ollamaCloud: {
@@ -316,22 +323,24 @@ const PROVIDERS = {
   },
 };
 
-// Уровни цепочки — см. requirements.md, раздел 5.6.
+// Уровни цепочки — см. requirements.md, раздел 5.6. Cerebras исключён (недоступен на
+// аккаунте пользователя) — уровень A стал соло-звеном (Groq), без гонки.
 const TIERS = [
-  { primary: ["groq", "cerebras"], backup: "gemini" },
+  { primary: ["groq"], backup: "gemini" },
   { primary: ["mistral"], backup: "cohere" },
-  { primary: ["openrouter"], backup: "githubModels" },
+  { primary: ["openrouter"], backup: "cloudflare" },
 ];
 
 // Отдельные уровни для промпта 5.5.2 (сопоставление тезисов с требованиями): без Groq в
-// уровне A — на практике Groq заметно хуже Gemini/Cerebras следует строгому лексическому
-// правилу совпадения (см. requirements.md 5.6), подбирая тезисы почти без разбора. Для
-// промпта 5.5.1 (структурирование вакансии) риск от нестрогого сопоставления не актуален —
-// там Groq остаётся в общей TIERS.
+// уровне A — на практике Groq заметно хуже Gemini следует строгому лексическому правилу
+// совпадения (см. requirements.md 5.6), подбирая тезисы почти без разбора. Cerebras (которым
+// раньше подменялся Groq в этом уровне) исключён из цепочки — уровень A сразу уходит в резерв
+// Gemini. Для промпта 5.5.1 (структурирование вакансии) риск от нестрогого сопоставления не
+// актуален — там Groq остаётся в общей TIERS.
 const TIERS_MATCHING = [
-  { primary: ["cerebras"], backup: "gemini" },
+  { primary: [], backup: "gemini" },
   { primary: ["mistral"], backup: "cohere" },
-  { primary: ["openrouter"], backup: "githubModels" },
+  { primary: ["openrouter"], backup: "cloudflare" },
 ];
 
 const FINAL_FALLBACK = "ollamaCloud";
@@ -458,6 +467,79 @@ ${JSON.stringify(inputJson)}
 """`;
 }
 
+// Промпт для /new, шаг 4: только сопоставление требований с тезисами, без вступления письма
+// (в отличие от 5.5.2) — используется при фильтрации вакансий по «% соответствия», где
+// intro пока не нужен (генерируется отдельно, только для выбранной вакансии, см.
+// buildIntroPrompt). Лексическое правило и схема matched-полей — как в 5.5.2.
+function buildMatchPrompt(inputJson) {
+  return `Посмотри список требований (массив requirements, нумерация с 0) и список тезисов опыта
+(массив theses, нумерация с 0), найди соответствия. Требование и тезис считаются
+соответствующими, только если в обоих встречается одно и то же (или синонимичное)
+существительное, глагол или аббревиатура, называющие конкретный навык, технологию, тип
+артефакта или деятельность — общие слова вроде "проект", "работа", "опыт", "бизнес",
+"аналитика", "разработка" не считаются. Аббревиатуры на разных языках для одного и того же
+артефакта — совпадение (например "ФТ" и "FR" — функциональные требования). Пример
+НЕсовпадения: "разработка архитектурного проекта" и "управление проектами разработки
+маркетплейсов" — общее только слово "проект". Пример совпадения: "разработка прототипов" и
+"прототипирование в Figma" — общий корень "прототип".
+
+Отдельное правило для требований о стаже вида "опыт от N лет": тезис засчитывается, если в
+нём указано численное значение общего стажа ≥ N, даже если название должности не совпадает
+дословно (например тезис "10+ лет опыта" покрывает требование "от 5 лет").
+
+По этому правилу пометь требования, для которых нашёлся хотя бы один подходящий тезис, как
+"выполненные", остальные как "невыполненные". Отдельно собери номера ВСЕХ тезисов, которые
+подошли хотя бы под одно требование, — ни один подходящий тезис не должен быть пропущен,
+каждый номер указывается только один раз, даже если тезис подходит под несколько требований.
+
+Ответ верни строго в формате JSON, без пояснений и без markdown-обрамления (без \`\`\`),
+по следующей схеме:
+
+{
+  "matched_thesis_indices": [0, 2],
+  "requirements_status": [
+    { "requirement": "string — точный текст требования из входного массива", "matched": true }
+  ]
+}
+
+Исходные данные:
+"""
+${JSON.stringify(inputJson)}
+"""`;
+}
+
+// Промпт для /new: только вступление письма (без сопоставления — оно уже сделано и
+// закэшировано на шаге фильтрации, см. buildMatchPrompt) — вызывается один раз, только для
+// вакансии, выбранной пользователем из списка.
+function buildIntroPrompt({ company, tasks, bonuses }) {
+  return `Исходя из описания компании, задач сотрудника и бонусов напиши вступление сопроводительного
+письма — почему соискатель хочет работать именно в этой компании. Вступление должно быть
+одним коротким предложением, без воды и без лишних оборотов. Пример: "Меня заинтересовала
+позиция Middle Python-разработчика в «Волна Технологии» — близок ваш продукт в финтехе и
+упор на высоконагруженные сервисы."
+
+Ответ верни строго в формате JSON, без пояснений и без markdown-обрамления (без \`\`\`),
+по следующей схеме:
+
+{
+  "intro": "string — вступление сопроводительного письма"
+}
+
+Исходные данные:
+"""
+${JSON.stringify({ company, tasks, bonuses })}
+"""`;
+}
+
+// Дословный текст тезисов по индексам от LLM — как в generateCoverParts (см. комментарий
+// у buildGeneratePrompt): исключает перефразирование текста тезисов моделью.
+function assembleExperiencePart(theses, matchedThesisIndices) {
+  return matchedThesisIndices
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < theses.length)
+    .map((i) => theses[i])
+    .join("\n");
+}
+
 async function structureVacancy(vacancyText) {
   const result = await callLLM(buildStructurePrompt(vacancyText));
   if (
@@ -492,4 +574,25 @@ async function generateCoverParts({ requirements, company, tasks, bonuses, these
   return { intro: result.intro, experience_part: experiencePart, requirements_status: result.requirements_status };
 }
 
-module.exports = { structureVacancy, generateCoverParts };
+// Шаг 4 /new: сопоставление требований вакансии с тезисами опыта, без письма — используется
+// при фильтрации кандидатов по «% соответствия» (см. requirements.md).
+async function matchRequirements({ requirements, theses }) {
+  const inputJson = { requirements, theses };
+  const result = await callLLM(buildMatchPrompt(inputJson), TIERS_MATCHING);
+  if (!Array.isArray(result.matched_thesis_indices) || !Array.isArray(result.requirements_status)) {
+    throw new Error("Ответ LLM не соответствует ожидаемой схеме (matched_thesis_indices/requirements_status).");
+  }
+  return result;
+}
+
+// /new, после выбора вакансии из списка: только вступление письма — сопоставление уже
+// закэшировано с шага фильтрации (matchRequirements), повторно не запрашивается.
+async function generateIntro({ company, tasks, bonuses, theses, matchedThesisIndices }) {
+  const result = await callLLM(buildIntroPrompt({ company, tasks, bonuses }), TIERS);
+  if (typeof result.intro !== "string") {
+    throw new Error("Ответ LLM не соответствует ожидаемой схеме (intro).");
+  }
+  return { intro: result.intro, experience_part: assembleExperiencePart(theses, matchedThesisIndices) };
+}
+
+module.exports = { structureVacancy, generateCoverParts, matchRequirements, generateIntro };
