@@ -5,6 +5,20 @@ const CBR_URL = "https://www.cbr-xml-daily.ru/daily_json.js";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 час
 const FETCH_TIMEOUT_MS = 5000;
 
+// Резервные курсы (рублей за 1 единицу валюты) — используются, если ЦБ РФ недоступен/не
+// отвечает, или не даёт курс для конкретной валюты (например, снятые с котировки коды вроде
+// BYR). Заданы пользователем вручную, устаревают со временем — актуальный курс из ЦБ РФ
+// всегда в приоритете, это только резерв на случай его недоступности (см. toRub).
+const DEFAULT_RATES = {
+  USD: 75,
+  EUR: 88,
+  KZT: 0.16,
+  BYR: 26.5,
+  AMD: 0.22,
+  GEL: 28,
+  UZS: 0.0062,
+};
+
 let cache = null; // { fetchedAt, rates: Map<string, number> } — rates: рублей за 1 единицу валюты
 let pendingFetch = null; // промис в процессе — чтобы параллельные вызовы toRub не били CBR одновременно
 
@@ -52,15 +66,17 @@ function normalizeCurrencyCode(code) {
   return code === "RUR" ? "RUB" : code;
 }
 
-// Возвращает сумму в рублях (округлённую) или null, если валюта неизвестна ЦБ РФ / курс
-// сейчас недоступен — в этом случае вызывающий код просто не отсеивает вакансию по зарплате.
+// Возвращает сумму в рублях (округлённую) или null, если валюта неизвестна ни ЦБ РФ, ни
+// резервному списку DEFAULT_RATES — в этом случае вызывающий код просто не отсеивает вакансию
+// по зарплате. Приоритет: живой курс ЦБ РФ → DEFAULT_RATES (если ЦБ РФ недоступен или не знает
+// эту валюту) → null.
 async function toRub(amount, currencyCode) {
   if (amount == null || !Number.isFinite(amount)) return null;
   const code = normalizeCurrencyCode(currencyCode);
   if (code === "RUB") return Math.round(amount);
 
   const rates = await getRates();
-  const rate = rates.get(code);
+  const rate = rates.get(code) ?? DEFAULT_RATES[code];
   if (!rate) return null;
   return Math.round(amount * rate);
 }
