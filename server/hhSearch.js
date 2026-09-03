@@ -202,10 +202,14 @@ function passesLocalFilters(vac, { stopWords, stopProfessions, minSalaryRub, rol
   return true;
 }
 
-// Шаги 1–3: ищет вакансии на hh.ru, переводит зарплаты в рубли, фильтрует локально и
-// останавливается, как только набрано maxCandidates подходящих вакансий (или кончились
-// страницы поиска / достигнут защитный предел страниц).
-async function searchCandidates({
+// Шаги 1–3, асинхронный генератор: ищет вакансии на hh.ru постранично, переводит зарплаты в
+// рубли, фильтрует локально и отдаёт (yield) каждую подходящую вакансию сразу, по одной — не
+// дожидаясь, пока наберётся какое-то фиксированное количество. Вызывающий код (server/index.js)
+// сам решает, когда остановиться (обычно — когда набралось нужное число вакансий, прошедших
+// уже LLM-сопоставление на шаге 4); при остановке через `break` в `for await` генератор
+// корректно завершается. `maxScanned` — защитный предел на случай, если подходящих вакансий
+// в принципе не наберётся (слишком строгие фильтры) — тогда генератор не сканирует бесконечно.
+async function* searchCandidates({
   professionalRoleIds,
   searchPhrase,
   areaIds,
@@ -214,11 +218,11 @@ async function searchCandidates({
   stopWords,
   stopProfessions,
   minSalaryRub,
-  maxCandidates,
+  maxScanned,
 }) {
-  const candidates = [];
   let roleNames = new Map();
   let totalPages = 1;
+  let scanned = 0;
 
   for (let page = 0; page < MAX_SEARCH_PAGES && page < totalPages; page++) {
     if (page > 0) await sleep(PAGE_DELAY_MS);
@@ -239,12 +243,12 @@ async function searchCandidates({
       const vac = await normalizeVacancy(raw);
       if (!passesLocalFilters(vac, { stopWords, stopProfessions, minSalaryRub, roleNames })) continue;
 
-      candidates.push({ ...vac, salaryDisplay: formatSalary(vac) });
-      if (candidates.length >= maxCandidates) return candidates;
+      yield { ...vac, salaryDisplay: formatSalary(vac) };
+
+      scanned++;
+      if (scanned >= maxScanned) return;
     }
   }
-
-  return candidates;
 }
 
 module.exports = { searchCandidates };

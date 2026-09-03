@@ -311,6 +311,18 @@ function renderRequirements() {
   el.reqCount.textContent = currentReqs.length + " пунктов";
 }
 
+// Тело ответа не всегда JSON — прокси/хостинг при обрыве соединения может вернуть простой
+// текст (например "upstream error"), тогда res.json() падает с невнятной "Unexpected token".
+async function readErrorMessage(res, fallback) {
+  const text = await res.text().catch(() => "");
+  try {
+    const data = JSON.parse(text);
+    return data.error || fallback;
+  } catch {
+    return text ? `${fallback} (${text.slice(0, 200)})` : fallback;
+  }
+}
+
 function showError(box, message) {
   box.textContent = message;
   box.classList.remove("hidden");
@@ -336,8 +348,8 @@ async function processVacancy() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
     });
+    if (!res.ok) throw new Error(await readErrorMessage(res, "Не удалось обработать вакансию."));
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Не удалось обработать вакансию.");
 
     vacancy = data; // { company, tasks, bonuses, requirements }
     currentReqs = data.requirements.map((text) => ({ text, matched: null }));
@@ -388,8 +400,8 @@ async function generateCover() {
         theses,
       }),
     });
+    if (!res.ok) throw new Error(await readErrorMessage(res, "Не удалось сгенерировать сопроводительное письмо."));
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Не удалось сгенерировать сопроводительное письмо.");
 
     // Сопоставляем по порядку: LLM не всегда возвращает "requirement" дословно (перефразирует),
     // поэтому точный текст ненадёжен как ключ — доверяем позиции в массиве (длины совпадают).

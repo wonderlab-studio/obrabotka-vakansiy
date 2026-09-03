@@ -364,8 +364,15 @@ function renderBullets(ul, items) {
   });
 }
 
+// Текст счётчика над списком вакансий — отдельная функция, т.к. во время потокового подбора
+// (см. searchVacancies) обновляется по событиям "progress"/"done", а не при каждом рендере списка.
+function updateVacCount(scanned, found, stillSearching) {
+  el.vacCount.textContent = stillSearching
+    ? `Найдено ${found} · проверено ${scanned} вакансий · поиск продолжается…`
+    : `Найдено ${found} подходящих вакансий (проверено ${scanned})`;
+}
+
 function renderVacancyList() {
-  el.vacCount.textContent = vacancies.length + " из отобранных подходят по вашим тезисам";
   el.vacList.innerHTML = "";
   vacancies.forEach((v, i) => {
     const item = document.createElement("button");
@@ -443,6 +450,51 @@ function collectSearchPayload() {
   };
 }
 
+// Тело ответа не всегда JSON — прокси/хостинг при обрыве соединения может вернуть простой
+// текст (например "upstream error"), тогда res.json() падает с невнятной "Unexpected token".
+async function readErrorMessage(res, fallback) {
+  const text = await res.text().catch(() => "");
+  try {
+    const data = JSON.parse(text);
+    return data.error || fallback;
+  } catch {
+    return text ? `${fallback} (${text.slice(0, 200)})` : fallback;
+  }
+}
+
+// Читает потоковый ответ /api/search-vacancies — по одной строке NDJSON за раз (см.
+// server/index.js) — и вызывает onEvent для каждого разобранного события. Повреждённые/
+// незавершённые строки просто пропускаются, а не роняют весь подбор.
+async function readNdjsonStream(res, onEvent) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (!line) continue;
+      try {
+        onEvent(JSON.parse(line));
+      } catch {
+        // повреждённая строка — пропускаем
+      }
+    }
+  }
+  const tail = buffer.trim();
+  if (tail) {
+    try {
+      onEvent(JSON.parse(tail));
+    } catch {
+      // повреждённый хвост — пропускаем
+    }
+  }
+}
+
 async function searchVacancies() {
   if (!el.searchPhraseInput.value.trim()) {
     showError(el.searchError, "Заполните поисковую фразу.");
@@ -452,10 +504,19 @@ async function searchVacancies() {
   hideError(el.searchError);
   el.resultsSection.classList.add("hidden");
   el.searchLoading.classList.remove("hidden");
+  el.searchLoading.querySelector(".txt").textContent =
+    "Ищу вакансии на hh.ru — как только найдётся первая подходящая, список появится ниже, поиск остальных продолжится в фоне…";
   el.searchBtn.disabled = true;
 
   const payload = collectSearchPayload();
   theses = payload.theses;
+  vacancies = [];
+  selectedIndex = null;
+
+  let firstVacancyShown = false;
+  let scanned = 0;
+  let found = 0;
+  let streamError = null;
 
   try {
     const res = await fetch("/api/search-vacancies", {
@@ -463,21 +524,50 @@ async function searchVacancies() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Не удалось подобрать вакансии.");
 
-    vacancies = data.vacancies || [];
-    selectedIndex = null;
-    el.vacEmpty.classList.remove("hidden");
-    el.vacDetails.classList.add("hidden");
+    if (!res.ok) {
+      throw new Error(await readErrorMessage(res, "Не удалось подобрать вакансии."));
+    }
 
-    if (!vacancies.length) {
-      showError(el.searchError, "По заданным параметрам подходящих вакансий не нашлось (или все были отфильтрованы). Попробуйте смягчить фильтры.");
+    await readNdjsonStream(res, (event) => {
+      if (event.type === "vacancy") {
+        vacancies.push(event.vacancy);
+        if (!firstVacancyShown) {
+          firstVacancyShown = true;
+          el.searchLoading.classList.add("hidden");
+          el.resultsSection.classList.remove("hidden");
+          el.vacEmpty.classList.remove("hidden");
+          el.vacDetails.classList.add("hidden");
+        }
+        renderVacancyList();
+      } else if (event.type === "progress") {
+        scanned = event.scanned;
+        found = event.found;
+        if (firstVacancyShown) {
+          updateVacCount(scanned, found, true);
+        } else {
+          el.searchLoading.querySelector(".txt").textContent = `Проверено ${scanned} вакансий, найдено ${found}…`;
+        }
+      } else if (event.type === "error") {
+        streamError = event.message;
+      } else if (event.type === "done") {
+        scanned = event.scanned;
+        found = event.found;
+      }
+    });
+
+    if (firstVacancyShown) {
+      updateVacCount(scanned, found, false);
+      if (streamError) {
+        showError(el.searchError, `Подбор прерван (${streamError}) — показаны уже найденные вакансии.`);
+      }
+    } else if (streamError) {
+      throw new Error(streamError);
     } else {
-      renderVacancyList();
-      el.resultsSection.classList.remove("hidden");
+      showError(el.searchError, "По заданным параметрам подходящих вакансий не нашлось (или все были отфильтрованы). Попробуйте смягчить фильтры.");
     }
   } catch (err) {
+    if (!firstVacancyShown) el.resultsSection.classList.add("hidden");
     showError(el.searchError, err.message);
   } finally {
     el.searchLoading.classList.add("hidden");
@@ -507,8 +597,10 @@ async function generateCover() {
         matched_thesis_indices: v.matched_thesis_indices,
       }),
     });
+    if (!res.ok) {
+      throw new Error(await readErrorMessage(res, "Не удалось сгенерировать сопроводительное письмо."));
+    }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Не удалось сгенерировать сопроводительное письмо.");
 
     el.coverText.textContent = assembleLetter(data.intro, data.experience_part, el.contactsInput.value.trim(), el.greetingInput.value.trim());
     el.coverState.classList.remove("hidden");

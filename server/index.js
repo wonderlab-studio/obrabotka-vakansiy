@@ -8,10 +8,14 @@ const { searchCandidates } = require("./hhSearch");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Сколько вакансий, прошедших локальные фильтры (стоп-слова/стоп-профессии/мин. з/п),
-// максимум обрабатывается через LLM (структурирование + сопоставление) за один клик
-// «Подобрать вакансии» — см. requirements.md, /new.
-const MAX_CANDIDATES = 30;
+// Сколько подходящих вакансий (прошедших и локальные фильтры, и % соответствия) нужно найти,
+// прежде чем остановить подбор — см. requirements.md, /new. Вакансии обрабатываются по одной;
+// как только наберётся столько — поиск останавливается, даже если хватило не всех просмотренных.
+const TARGET_QUALIFIED = 5;
+// Защитный предел на число вакансий, которые вообще просматриваются через LLM за один подбор
+// (структурирование + сопоставление) — на случай, если TARGET_QUALIFIED никогда не наберётся
+// из-за слишком строгих фильтров/порога. Без него поиск мог бы не останавливаться очень долго.
+const MAX_SCANNED = 60;
 // Пауза между вакансиями на шаге 4 (запрос страницы вакансии на hh.ru + LLM) — не долбить
 // hh.ru и LLM-провайдеров подряд без пауз, как DELAY в 1_parse.py.
 const CANDIDATE_DELAY_MS = 1500;
@@ -85,8 +89,23 @@ app.post("/api/search-vacancies", async (req, res) => {
 
   console.log(`[usage] Подобрать вакансии: "${searchPhrase}", порог соответствия ${matchThreshold}%`);
 
+  // Потоковый ответ (NDJSON — одна JSON-строка на событие): подбор может занимать больше
+  // времени, чем готов ждать прокси/хостинг без активности на соединении (на Railway это
+  // приводило к обрыву с "upstream error"), плюс фронтенд теперь показывает вакансии по мере
+  // нахождения, а не одним пакетом в конце. Типы событий: "vacancy" (найдена подходящая
+  // вакансия), "progress" (обновление счётчиков для спиннера), "done" (подбор завершён),
+  // "error" (подбор прерван ошибкой).
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+  });
+  const send = (event) => res.write(JSON.stringify(event) + "\n");
+
+  let scanned = 0;
+  let found = 0;
   try {
-    const candidates = await searchCandidates({
+    const candidates = searchCandidates({
       professionalRoleIds,
       searchPhrase,
       areaIds,
@@ -95,11 +114,11 @@ app.post("/api/search-vacancies", async (req, res) => {
       stopWords,
       stopProfessions,
       minSalaryRub,
-      maxCandidates: MAX_CANDIDATES,
+      maxScanned: MAX_SCANNED,
     });
 
-    const vacancies = [];
-    for (const candidate of candidates) {
+    for await (const candidate of candidates) {
+      scanned++;
       try {
         const vacancyText = await fetchVacancyText(candidate.url);
         const structured = await structureVacancy(vacancyText);
@@ -110,32 +129,41 @@ app.post("/api/search-vacancies", async (req, res) => {
         const percent = total ? Math.round((matchedCount / total) * 100) : 100;
 
         if (percent >= matchThreshold) {
-          vacancies.push({
-            id: candidate.id,
-            url: candidate.url,
-            title: candidate.title,
-            companyName: candidate.companyName,
-            areaName: candidate.areaName,
-            salaryDisplay: candidate.salaryDisplay,
-            company: structured.company,
-            tasks: structured.tasks,
-            bonuses: structured.bonuses,
-            requirements: structured.requirements,
-            requirements_status: match.requirements_status,
-            matched_thesis_indices: match.matched_thesis_indices,
-            matchPercent: percent,
+          found++;
+          send({
+            type: "vacancy",
+            vacancy: {
+              id: candidate.id,
+              url: candidate.url,
+              title: candidate.title,
+              companyName: candidate.companyName,
+              areaName: candidate.areaName,
+              salaryDisplay: candidate.salaryDisplay,
+              company: structured.company,
+              tasks: structured.tasks,
+              bonuses: structured.bonuses,
+              requirements: structured.requirements,
+              requirements_status: match.requirements_status,
+              matched_thesis_indices: match.matched_thesis_indices,
+              matchPercent: percent,
+            },
           });
         }
       } catch (err) {
         console.error(`[подбор вакансий] Пропущена вакансия ${candidate.url}: ${err.message}`);
       }
+
+      send({ type: "progress", scanned, found });
+      if (found >= TARGET_QUALIFIED) break;
       await sleep(CANDIDATE_DELAY_MS);
     }
-
-    res.json({ vacancies, scanned: candidates.length });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    console.error(`[подбор вакансий] Подбор прерван ошибкой: ${err.message}`);
+    send({ type: "error", message: err.message });
   }
+
+  send({ type: "done", scanned, found });
+  res.end();
 });
 
 app.post("/api/generate-intro", async (req, res) => {
