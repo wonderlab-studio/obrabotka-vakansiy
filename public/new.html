@@ -114,6 +114,8 @@
   .vac-item .vac-meta { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 12px; }
   .vac-item .vac-match { font: 500 11px var(--font-mono); color: var(--ok); }
   .vac-count { font-size: 12px; color: var(--muted-2); margin-bottom: 10px; }
+  .vac-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; font: 500 13px var(--font-sans); color: var(--accent); text-decoration: none; }
+  .vac-link:hover { text-decoration: underline; }
 
   /* ── Требования / company / tasks / bonuses (как на главной странице) ──── */
   .result-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; align-items: start; }
@@ -258,6 +260,7 @@
           <span class="label label--accent">Подобранные вакансии</span>
           <div class="vac-count" id="vacCount"></div>
           <div class="vac-list" id="vacList"></div>
+          <a class="vac-link hidden" id="vacLink" href="#" target="_blank" rel="noopener noreferrer">Открыть выбранную вакансию на hh.ru ↗</a>
         </div>
 
         <div class="fields-grid">
@@ -331,7 +334,7 @@ const el = {
   workFormatInput: $("workFormatInput"), daysInput: $("daysInput"), matchThresholdInput: $("matchThresholdInput"),
   stopWordsInput: $("stopWordsInput"), stopProfessionsInput: $("stopProfessionsInput"), minSalaryInput: $("minSalaryInput"),
   expInput: $("expInput"), searchBtn: $("searchBtn"), searchError: $("searchError"), searchLoading: $("searchLoading"),
-  resultsSection: $("resultsSection"), vacCount: $("vacCount"), vacList: $("vacList"),
+  resultsSection: $("resultsSection"), vacCount: $("vacCount"), vacList: $("vacList"), vacLink: $("vacLink"),
   greetingInput: $("greetingInput"), contactsInput: $("contactsInput"),
   vacEmpty: $("vacEmpty"), vacDetails: $("vacDetails"),
   reqList: $("reqList"), reqCount: $("reqCount"), score: $("score"),
@@ -401,6 +404,8 @@ function selectVacancy(i) {
   renderVacancyList();
 
   const v = vacancies[i];
+  el.vacLink.href = v.url;
+  el.vacLink.classList.remove("hidden");
   currentReqs = v.requirements.map((text, idx) => {
     const status = v.requirements_status[idx] || v.requirements_status.find((s) => s.requirement === text);
     return { text, matched: status ? !!status.matched : false };
@@ -512,6 +517,7 @@ async function searchVacancies() {
   theses = payload.theses;
   vacancies = [];
   selectedIndex = null;
+  el.vacLink.classList.add("hidden");
 
   let firstVacancyShown = false;
   let scanned = 0;
@@ -651,6 +657,7 @@ function resetAll() {
   el.searchLoading.classList.add("hidden");
   el.coverState.classList.add("hidden");
   el.coverEmpty.classList.remove("hidden");
+  el.vacLink.classList.add("hidden");
 }
 
 el.searchBtn.addEventListener("click", searchVacancies);
